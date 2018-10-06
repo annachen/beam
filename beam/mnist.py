@@ -11,10 +11,10 @@ MNIST_ROOT = '~/data/mnist'
 rbm_params = {
     'nv': 28 * 28,
     'nh': 50,
-    'batch_size': 1,
+    'batch_size': 20,
 }
 
-def train_mnist(batch_size=1, learning_rate=0.1):
+def train_mnist(batch_size=20, learning_rate=1e-3):
     # prepare data
     trainset = mnist.MNIST(
         root=MNIST_ROOT,
@@ -34,9 +34,11 @@ def train_mnist(batch_size=1, learning_rate=0.1):
     # prepare RBM
     rbm = RBM(rbm_params['nv'],
               rbm_params['nh'],
-              rbm_params['batch_size'])
+              rbm_params['batch_size'],
+              seed=0)
     rbm.initialize()
 
+    errs = []
     for batch in train_iter:
         # for now only works with batch_size=1
         imgs, _ = batch
@@ -46,9 +48,5 @@ def train_mnist(batch_size=1, learning_rate=0.1):
 
         # make it flat
         imgs = imgs.reshape((imgs.shape[0], -1))
-
-        # for now pass it into RBM one by one, since it doesn't support batch yet
-        for img in imgs:
-            rbm.train_step(im, learning_rate)
-
-
+        rbm.train_step(imgs, learning_rate, sample=True)
+        errs.append(rbm.reconstruction_error(imgs))

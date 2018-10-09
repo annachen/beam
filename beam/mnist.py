@@ -4,6 +4,7 @@ from torchvision.datasets import mnist
 from torchvision import transforms
 
 from rbm import RBM
+from beam import BEAM
 
 
 MNIST_ROOT = '~/data/mnist'
@@ -14,7 +15,24 @@ rbm_params = {
     'batch_size': 20,
 }
 
-def train_mnist(batch_size=20, learning_rate=1e-3):
+rbm_training_params = {
+    'learning_rate': 1e-3,
+}
+
+beam_params = {
+    'nv': 28 * 28,
+    'nh': 50,
+    'batch_size': 20,
+}
+
+beam_training_params = {
+    'learning_rate': 1e-3,
+    'adversary_weight': 0.5,
+    'k_neighbors': 5
+}
+
+
+def get_iterators(batch_size):
     # prepare data
     trainset = mnist.MNIST(
         root=MNIST_ROOT,
@@ -31,12 +49,32 @@ def train_mnist(batch_size=20, learning_rate=1e-3):
     test_iter = torch.utils.data.DataLoader(
         testset, batch_size=batch_size, shuffle=True, num_workers=1)
 
-    # prepare RBM
-    rbm = RBM(rbm_params['nv'],
-              rbm_params['nh'],
-              rbm_params['batch_size'],
-              seed=0)
-    rbm.initialize()
+    return train_iter, test_iter
+
+
+def get_network(typ):
+    if typ == 'rbm':
+        # prepare RBM
+        net = RBM(rbm_params['nv'],
+                  rbm_params['nh'],
+                  rbm_params['batch_size'],
+                  seed=0)
+    elif typ == 'beam':
+        # prepare BEAM
+        net = BEAM(beam_params['nv'],
+                   beam_params['nh'],
+                   beam_params['batch_size'],
+                   seed=0)
+    return net
+
+
+def train(typ):
+    net = get_network(typ)
+    net.initialize()
+
+    train_iter, test_iter = get_iterators(net._batch_size)
+
+    train_params = eval('{}_train_params'.format(typ))
 
     errs = []
     for batch in train_iter:
@@ -48,5 +86,5 @@ def train_mnist(batch_size=20, learning_rate=1e-3):
 
         # make it flat
         imgs = imgs.reshape((imgs.shape[0], -1))
-        rbm.train_step(imgs, learning_rate, sample=True)
-        errs.append(rbm.reconstruction_error(imgs))
+        net.train_step(imgs, *train_params, sample=True)
+        errs.append(net.reconstruction_error(imgs))

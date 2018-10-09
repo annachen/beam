@@ -87,8 +87,8 @@ class BEAM(object):
         par_E_par_vb_model = []
         for vt, ht in zip(v_, h_):
             par_E_par_W_model.append(-np.matmul(vt[..., np.newaxis], ht[np.newaxis]))
-            par_E_par_hb_model.append(-h_)
-            par_E_par_vb_model.append(-v_)
+            par_E_par_hb_model.append(-ht)
+            par_E_par_vb_model.append(-vt)
         par_E_par_W_model = np.array(par_E_par_W_model)  # (batch_size, nv, nh)
         par_E_par_hb_model = np.array(par_E_par_hb_model)  # (batch_size, nh)
         par_E_par_vb_model = np.array(par_E_par_vb_model)  # (batch_size, nv)
@@ -106,7 +106,7 @@ class BEAM(object):
             # I need to put in h_data and h_
             self._memory = sklearn.neighbors.KDTree(
                 np.concatenate([h_data, h_], axis=0),
-                leaf_size=self.batch_size / 10)
+                leaf_size=self._batch_size / 10)
             # note that h_data formed the first half
             par_A_par_W = np.zeros_like(self.W)
             par_A_par_vb = np.zeros_like(self.vb)
@@ -141,6 +141,9 @@ class BEAM(object):
             par_A_par_W = prod_W - mean_critic * np.mean(-par_E_par_W_model, axis=0)
             par_A_par_vb = prod_vb - mean_critic * np.mean(-par_E_par_vb_model, axis=0)
             par_A_par_hb = prod_hb - mean_critic * np.mean(-par_E_par_hb_model, axis=0)
+        #print (par_A_par_W.shape, par_L_par_W.shape)
+        #print (par_A_par_vb.shape, par_L_par_vb.shape)
+        #print (par_A_par_hb.shape, par_L_par_hb.shape)
 
         # update them
         def _combine_with_weight(x, y):
@@ -154,11 +157,11 @@ class BEAM(object):
         self.vb -= learning_rate * delta_vb
         self.hb -= learning_rate * delta_hb
 
-    def knn_critic(h, k):
+    def knn_critic(self, h, k):
         # h: (batch_size, nh)
         # self._memory: points from previous iteration
         _, ind = self._memory.query(h, k=k)  # ind: (batch_size, k)
-        return np.sum(ind < self.batch_size, axis=1) / self.batch_size - 1.
+        return np.sum(ind < self._batch_size, axis=1) / self._batch_size - 1.
 
     def reconstruction_error(self, v):
         # v: (batch_size, nv)
@@ -175,7 +178,7 @@ class BEAM(object):
             'hb': self.hb,
             'vb': self.vb
         }
-        joblib.dump(path, model, protocol=2)
+        joblib.dump(model, path, protocol=2)
 
     def load(self, path):
         model = joblib.load(path)

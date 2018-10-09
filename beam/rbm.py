@@ -131,7 +131,7 @@ class RBM(object):
             'hb': self.hb,
             'vb': self.vb
         }
-        joblib.dump(path, model, protocol=2)
+        joblib.dump(model, path, protocol=2)
 
     def load(self, path):
         model = joblib.load(path)

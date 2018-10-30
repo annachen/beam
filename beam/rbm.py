@@ -2,6 +2,11 @@ import numpy as np
 import joblib
 
 
+# TODO(anna): add sparsity constraint
+# TODO(anna): add entroty loss term
+# TODO(anna): add monitoring kl divergence (and reverse kl divergence)
+# TODO(anna): try unit test case? say in a 3x3 patch, only 1 pixel is on
+
 class RBM(object):
     def __init__(self, nv, nh, batch_size, seed=None):
         self._nv = nv
@@ -123,18 +128,29 @@ class RBM(object):
         v_ = self.p_v_given_h(h)
         return np.mean((v - v_) ** 2)
 
+    # TODO: make these better by making the class picklable, maybe
     def save(self, path):
         if not path.endswith('.pkl'):
             path += '.pkl'
         model = {
             'W': self.W,
             'hb': self.hb,
-            'vb': self.vb
+            'vb': self.vb,
+            'params': {
+                'nv': self._nv,
+                'nh': self._nh,
+                'batch_size': self._batch_size
+            },
+            'random_state': self._random_state,
         }
         joblib.dump(model, path, protocol=2)
 
-    def load(self, path):
+    def load(cls, path):
         model = joblib.load(path)
         self.W = model['W']
         self.hb = model['hb']
         self.vb = model['vb']
+        self._nv = model['params']['nv']
+        self._nh = model['params']['nh']
+        self._batch_size = model['params']['batch_size']
+        self._random_state = model['random_state']

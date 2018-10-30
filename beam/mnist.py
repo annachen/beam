@@ -68,23 +68,23 @@ def get_network(typ):
     return net
 
 
-def train(typ):
+def init_network(typ):
     net = get_network(typ)
     net.initialize()
+    return net
 
-    train_iter, test_iter = get_iterators(net._batch_size)
 
-    train_params = eval('{}_train_params'.format(typ))
-
+def train(net, iterator, train_params, n_steps=1000):
     errs = []
-    for batch in train_iter:
-        # for now only works with batch_size=1
-        imgs, _ = batch
+    for batch in iterator:
         # I guess in pytorch it's (N, C, H, W)
         # just gonna convert to numpy now since i'm not really using pytorch
-        imgs = np.asarray(imgs)
+        imgs, _ = batch
+        imgs = np.asarray(imgs).reshape((imgs.shape[0], -1))
 
-        # make it flat
-        imgs = imgs.reshape((imgs.shape[0], -1))
-        net.train_step(imgs, *train_params, sample=True)
+        # run training
+        net.train_step(imgs, **train_params, sample=True)
         errs.append(net.reconstruction_error(imgs))
+        if len(errs) == n_steps:
+            break
+    return errs

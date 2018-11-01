@@ -3,8 +3,9 @@ import torch
 from torchvision.datasets import mnist
 from torchvision import transforms
 
-from rbm import RBM
-from beam import BEAM
+from .rbm import RBM
+from .beam import BEAM
+from .gbrbm import GaussianBernoulliRBM
 
 
 MNIST_ROOT = '~/data/mnist'
@@ -17,6 +18,17 @@ rbm_params = {
 
 rbm_training_params = {
     'learning_rate': 1e-3,
+}
+
+gbrbm_params = {
+    'nv': 28 * 28,
+    'nh': 50,
+    'batch_size': 20,
+    'sigma': 0.2,
+}
+
+gbrbm_training_params = {
+    'learning_rate': 1e-3
 }
 
 beam_params = {
@@ -65,6 +77,12 @@ def get_network(typ):
                    beam_params['nh'],
                    beam_params['batch_size'],
                    seed=0)
+    elif typ == 'gbrbm':
+        net = GaussianBernoulliRBM(gbrbm_params['nv'],
+                                   gbrbm_params['nh'],
+                                   gbrbm_params['batch_size'],
+                                   gbrbm_params['sigma'],
+                                   seed=0)
     return net
 
 

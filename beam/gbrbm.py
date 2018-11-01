@@ -1,8 +1,7 @@
 import numpy as np
 import joblib
-import scipy.stats
-import rbm
-from utils import sigmoid
+from .rbm import RBM
+from .utils import sigmoid
 
 
 # TODO(anna): add sparsity constraint
@@ -11,30 +10,39 @@ from utils import sigmoid
 # TODO(anna): run on the paper examples again
 # TODO(anna): try unit test case? say in a 3x3 patch, only 1 pixel is on
 
-class GaussianBernoulliRBM(rbm.RBM):
-    def __init__(self, ...):
-        super().__init__(...)
+class GaussianBernoulliRBM(RBM):
+    def __init__(self, nv, nh, batch_size,
+                 sigma,
+                 #sparsity_coef,
+                 seed=None):
+        super(GaussianBernoulliRBM, self).__init__(nv, nh, batch_size, seed=seed)
+        #self.sparsity_coef = sparsity_coef
         self.sigma = sigma
 
     def p_h_given_v(self, v):
         # v: (batch_size, nv)
         # output: (batch_size, nh)
-        return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W) / (self.sigma ** 2))
+        return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W) / self.sigma)
 
-    def p_v_given_h(self, h):
+    def mean_p_v_given_h(self, h):
+        # h: (batch_size, nh)
+        # output: (batch_size, nv)
+        return self.vb[np.newaxis] + np.matmul(h, self.W.T)
+
+    def sample_p_v_given_h(self, h):
         # h: (batch_size, nh)
         # output: (batch_size, nv)
         center = self.vb[np.newaxis] + np.matmul(h, self.W.T)
-        return scipy.stats.norm.pdf(h, loc=center, scale=self.sigma)
+        return self.random_state.normal(loc=center, scale=self.sigma)
 
     def par_nll_par_W(self, v, h):
-        return np.matmul(v.T, h) / self._batch_size
+        return np.matmul(v.T, h) / self._batch_size / self.sigma
 
     def par_nll_par_hb(self, h):
         return np.mean(h, axis=0)
 
     def par_nll_par_vb(self, v):
-        return np.mean(v, axis=0) / (self.sigma ** 2)
+        return np.mean(v - self.vb, axis=0) / (self.sigma ** 2)
 
     def train_step(self, v, learning_rate, sample=False, n_gibbs=1):
         """
@@ -68,12 +76,10 @@ class GaussianBernoulliRBM(rbm.RBM):
         # TODO: start here
         # 2nd component of gradient is total energy average over model distribution
         for _ in range(n_gibbs):
-            p_v_given_h = self.p_v_given_h(h)
             if sample:
-                v_ = (self._random_state.rand(self._batch_size, self._nv) < p_v_given_h)\
-                     .astype(np.float32)
+                v_ = self.sample_p_v_given_h(h)
             else:
-                v_ = p_v_given_h
+                v_ = self.mean_p_v_given_h(h)
 
             p_h_given_v_ = self.p_h_given_v(v_)
             # for hidden layer, always sample (unless calculating updates below)
@@ -89,23 +95,24 @@ class GaussianBernoulliRBM(rbm.RBM):
         else:
             par_nll_par_W_model = self.par_nll_par_W(v_, p_h_given_v_)
             par_nll_par_hb_model = self.par_nll_par_hb(p_h_given_v_)
-            par_nll_par_vb_model = self.par_nll_par_vb(p_v_given_h)
+            par_nll_par_vb_model = self.par_nll_par_vb(v_)
 
         # now the update is just the <...>data - <...>model
+        # or <...>model - <...>data, if using -= in the update
         delta_W = par_nll_par_W_data - par_nll_par_W_model
         delta_vb = par_nll_par_vb_data - par_nll_par_vb_model
         delta_hb = par_nll_par_hb_data - par_nll_par_hb_model
 
         # update it!
-        self.W -= learning_rate * delta_W
-        self.vb -= learning_rate * delta_vb
-        self.hb -= learning_rate * delta_hb
+        self.W += learning_rate * delta_W
+        self.vb += learning_rate * delta_vb
+        self.hb += learning_rate * delta_hb
 
     def reconstruction_error(self, v):
         # v: (batch_size, nv)
         h = (self._random_state.rand(self._batch_size, self._nh) < self.p_h_given_v(v))\
             .astype(np.float32)
-        v_ = self.p_v_given_h(h)
+        v_ = self.mean_p_v_given_h(h)
         return np.mean((v - v_) ** 2)
 
     # TODO: make these better by making the class picklable, maybe

@@ -25,6 +25,8 @@ gbrbm_params = {
     'nh': 50,
     'batch_size': 20,
     'sigma': 0.2,
+    'sparsity_coef': 0.1,
+    'h_given_v_entropy_coef': 0.01,
 }
 
 gbrbm_training_params = {
@@ -82,6 +84,8 @@ def get_network(typ):
                                    gbrbm_params['nh'],
                                    gbrbm_params['batch_size'],
                                    gbrbm_params['sigma'],
+                                   sparsity_coef=gbrbm_params['sparsity_coef'],
+                                   h_given_v_entropy_coef=gbrbm_params['h_given_v_entropy_coef'],
                                    seed=0)
     return net
 

@@ -13,16 +13,21 @@ from .utils import sigmoid
 class GaussianBernoulliRBM(RBM):
     def __init__(self, nv, nh, batch_size,
                  sigma,
-                 #sparsity_coef,
+                 sparsity_coef=0.,
+                 h_given_v_entropy_coef=0.,
                  seed=None):
         super(GaussianBernoulliRBM, self).__init__(nv, nh, batch_size, seed=seed)
-        #self.sparsity_coef = sparsity_coef
+        self.sparsity_coef = sparsity_coef
+        self.h_given_v_entropy_coef = h_given_v_entropy_coef
         self.sigma = sigma
 
     def p_h_given_v(self, v):
         # v: (batch_size, nv)
         # output: (batch_size, nh)
         return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W) / self.sigma)
+
+    def p_h_given_v_logits(self, v):
+        return self.hb[np.newaxis] + np.matmul(v, self.W) / self.sigma
 
     def mean_p_v_given_h(self, h):
         # h: (batch_size, nh)
@@ -43,6 +48,9 @@ class GaussianBernoulliRBM(RBM):
 
     def par_nll_par_vb(self, v):
         return np.mean(v - self.vb, axis=0) / (self.sigma ** 2)
+
+    def par_l1_par_W(self):
+        return np.sign(self.W)
 
     def train_step(self, v, learning_rate, sample=False, n_gibbs=1):
         """
@@ -103,8 +111,21 @@ class GaussianBernoulliRBM(RBM):
         delta_vb = par_nll_par_vb_data - par_nll_par_vb_model
         delta_hb = par_nll_par_hb_data - par_nll_par_hb_model
 
+        # sparsity constraint
+        # this seems to make W sparse, but not h
+        # on the other hand, since each feature is very small and local now,
+        # we need more h to be activated (?)
+        delta_W_l1 = self.par_l1_par_W()
+
+        # entropy constraint
+        logits = self.p_h_given_v_logits(v)  # (batch_size, nh)
+        h_term = logits * sigmoid(logits) * (1. - sigmoid(logits))
+        delta_W_entropy = -np.matmul(v.T, h_term) / self.sigma
+
         # update it!
-        self.W += learning_rate * delta_W
+        self.W += learning_rate *\
+                  (delta_W - self.sparsity_coef * delta_W_l1\
+                           - self.h_given_v_entropy_coef * delta_W_entropy)
         self.vb += learning_rate * delta_vb
         self.hb += learning_rate * delta_hb
 

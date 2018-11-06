@@ -1,5 +1,6 @@
 import numpy as np
 import joblib
+from .utils import sigmoid
 
 
 # TODO(anna): add sparsity constraint
@@ -8,33 +9,168 @@ import joblib
 # TODO(anna): try unit test case? say in a 3x3 patch, only 1 pixel is on
 
 class RBM(object):
-    def __init__(self, nv, nh, batch_size, seed=None):
+    additional_losses = []
+
+    def __init__(self, nv, nh, batch_size, random_state=None):
         self._nv = nv
         self._nh = nh
         self._batch_size = batch_size
-        self._random_state = np.random.RandomState(seed=seed)
+        self._random_state = random_state
 
     def initialize(self, scale=0.01):
-        # TODO: extent to handle batch input
         # NOTE(anna): very sensitive to initial W range; smaller seems better
         self.W = self._random_state.normal(0, scale, (self._nv, self._nh))
-        # self.W = (self._random_state.rand(self._nv, self._nh) - 0.5) * 0.1
         self.vb = np.zeros((self._nv))
         self.hb = np.zeros((self._nh))
 
+    def p_h_given_v(self, v):
+        raise NotImplementedError()
+
+    def p_v_given_h(self, h):
+        raise NotImplementedError()
+
+    def sample_p_v_given_h(self, h):
+        raise NotImplementedError()
+
+    def mean_p_v_given_h(self, h):
+        raise NotImplementedError()
+
+    def par_nll_par_W(self, v, h):
+        raise NotImplementedError()
+
+    def par_nll_par_hb(self, h):
+        raise NotImplementedError()
+
+    def par_nll_par_vb(self, v):
+        raise NotImplementedError()
+
+    def train_step(self, v, learning_rate, sample=False, n_gibbs=1):
+        # train with gradient descent
+        # first run a few steps of the chain
+        p_h_given_v0, h0, vn, p_h_given_vn, hn = self.run_chain(
+            v, sample=sample, n_gibbs=n_gibbs)
+
+        delta_W, delta_vb, delta_hb = self.updates_from_nll(
+            v, p_h_given_v0, h0, vn, p_h_given_vn, hn, sample=sample)
+
+        for loss in self.additional_losses:
+            updates_fn = eval('self.updates_from_{}'.format(loss))
+            delta_W_tmp, delta_vb_tmp, delta_hb_tmp = updates_fn(
+                v, p_h_given_v0, h0, vn, p_h_given_vn, hn)
+            loss_weight = eval('self.{}_coef'.format(loss))
+            delta_W += loss_weight * delta_W_tmp
+            delta_vb += loss_weight * delta_vb_tmp
+            delta_hb += loss_weight * delta_hb_tmp
+
+        # finally, update for real
+        self.W += learning_rate * delta_W
+        self.vb += learning_rate * delta_vb
+        self.hb += learning_rate * delta_hb
+
+    def run_chain(self, v, sample=False, n_gibbs=1):
+        # first step, v -> h
+        p_h_given_v0 = self.p_h_given_v(v)
+        h0 = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_v)\
+             .astype(np.float32)
+
+        # now, do n_gibbs times of h -> v, v -> h
+        for _ in range(n_gibbs):
+            if sample:
+                vn = self.sample_p_v_given_h(h)
+            else:
+                vn = self.mean_p_v_given_h(h)
+
+            p_h_given_vn = self.p_h_given_v(vn)
+            # for hidden layer, always sample (unless calculating updates)
+            hn = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_vn)\
+                 .astype(np.float32)
+        return p_h_given_v0, h0, vn, p_h_given_vn, hn
+
+    def updates_from_nll(self, v, p_h_given_v0, h0, vn, p_h_given_vn, hn, sample=False):
+        # calculate data stats based on v and h0 (p_h_given_v0)
+        if sample:
+            # v: (batch_size, nv)
+            # h: (batch_size, nh)
+            # par_nll_par_W_data: (nv, nh)
+            par_nll_par_W_data = self.par_nll_par_W(v, h0)
+            par_nll_par_hb_data = self.par_nll_par_hb(h0)
+        else:
+            par_nll_par_W_data = self.par_nll_par_W(v, p_h_given_v0)
+            par_nll_par_hb_data = self.par_nll_par_hb(p_h_given_v0)
+        par_nll_par_vb_data = self.par_nll_par_vb(v)
+
+        # calculate model stats based on vn and hn (p_h_given_vn)
+        if sample:
+            par_nll_par_W_model = self.par_nll_par_W(vn, hn)
+            par_nll_par_hb_model = self.par_nll_par_hb(hn)
+        else:
+            par_nll_par_W_model = self.par_nll_par_W(vn, p_h_given_vn)
+            par_nll_par_hb_model = self.par_nll_par_hb(p_h_given_vn)
+        par_nll_par_vb_data = self.par_nll_par_vb(vn)
+        return (par_nll_par_W_data - par_nll_par_W_model,
+                par_nll_par_vb_data - par_nll_par_vb_model,
+                par_nll_par_hb_data - par_nll_par_hb_model)
+
+
+class BernoulliRBM(RBM):
+    typ = 'bernoulli'
+
+    def p_h_given_v(self, v):
+        return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W))
+
+    def p_v_given_h(self, h):
+        return sigmoid(self.vb[np.newaxis] + np.matmul(h, self.W.T))
+
+    def sample_p_v_given_h(self, h):
+        p_v_given_h = self.p_v_given_h(h)
+        return (self._random_state.rand(self._batch_size, self._nv) < p_v_given_h)\
+               .astype(np.float32)
+
+    def mean_p_v_given_h(self, h):
+        return p_v_given_h(h)
+
+    def par_nll_par_W(self, v, h):
+        return np.matmul(v.T, h) / self._batch_size
+
+    def par_nll_par_hb(self, h):
+        return np.mean(h, axis=0)
+
+    def par_nll_par_vb(self, v):
+        return np.mean(v, axis=0)
+
+    # TODO: add saving and loading
+    # TODO: add reconstruction error
+    # TODO: add KL divergence based on particles
+    # TODO: test this implementation
+
+
+
+# old implementation of BernoulliRBM.
+class BernoulliRBMOld(RBM):
     def p_h_given_v(self, v):
         # technically, p(h_j = 1 | v) for all j
         # p(h_j = 1 | v) = 1 / (1 + exp(b_j + sum_i(v_i * W_ij)))
         # v: (batch_size, nv)
         # output: (batch_size, nh)
-        return 1. / (1. + np.exp(self.hb[np.newaxis] + np.matmul(v, self.W)))
+        # NOTE: there's a sign change making this a sigmoid function
+        return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W))
 
     def p_v_given_h(self, h):
         # technically, p(v_i = 1 | h) for all i
         # p(v_i = 1 | h) = 1 / (1 + exp(a_i + sum_j(h_j * W_ij)))
         # h: (batch_size, nh)
         # output: (batch_size, nv)
-        return 1. / (1. + np.exp(self.vb[np.newaxis] + np.matmul(h, self.W.T)))
+        # NOTE: there's a sign change making this a sigmoid function
+        return sigmoid(self.vb[np.newaxis] + np.matmul(h, self.W.T))
+
+    def par_nll_par_W(self, v, h):
+        return np.matmul(v.T, h) / self._batch_size
+
+    def par_nll_par_hb(self, h):
+        return np.mean(h, axis=0)
+
+    def par_nll_par_vb(self, v):
+        return np.mean(v, axis=0)
 
     def train_step(self, v, learning_rate, sample=False, n_gibbs=1):
         """
@@ -61,7 +197,6 @@ class RBM(object):
             # h: (batch_size, nh)
             # tmp: (batch_size, nv, nh)
             # par_E_par_W_data: (nv, nh) = mean(tmp, axis=0)
-            # TODO(anna): use einsum to optimize?
             par_E_par_W_data = -np.matmul(v.T, h) / self._batch_size
             par_E_par_hb_data = -np.mean(h, axis=0)
             #par_E_par_W_data = -np.matmul(v[..., np.newaxis], h[np.newaxis])

@@ -70,15 +70,16 @@ class RBM(object):
     def run_chain(self, v, sample=False, n_gibbs=1):
         # first step, v -> h
         p_h_given_v0 = self.p_h_given_v(v)
-        h0 = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_v)\
+        h0 = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_v0)\
              .astype(np.float32)
 
         # now, do n_gibbs times of h -> v, v -> h
+        hn = np.copy(h0)
         for _ in range(n_gibbs):
             if sample:
-                vn = self.sample_p_v_given_h(h)
+                vn = self.sample_p_v_given_h(hn)
             else:
-                vn = self.mean_p_v_given_h(h)
+                vn = self.mean_p_v_given_h(hn)
 
             p_h_given_vn = self.p_h_given_v(vn)
             # for hidden layer, always sample (unless calculating updates)
@@ -106,10 +107,16 @@ class RBM(object):
         else:
             par_nll_par_W_model = self.par_nll_par_W(vn, p_h_given_vn)
             par_nll_par_hb_model = self.par_nll_par_hb(p_h_given_vn)
-        par_nll_par_vb_data = self.par_nll_par_vb(vn)
+        par_nll_par_vb_model = self.par_nll_par_vb(vn)
         return (par_nll_par_W_data - par_nll_par_W_model,
                 par_nll_par_vb_data - par_nll_par_vb_model,
                 par_nll_par_hb_data - par_nll_par_hb_model)
+
+    def reconstruction_error(self, v):
+        h = (self._random_state.rand(self._batch_size, self._nh) < self.p_h_given_v(v))\
+            .astype(np.float32)
+        v_ = self.mean_p_v_given_h(h)
+        return np.mean((v - v_) ** 2)
 
 
 class BernoulliRBM(RBM):
@@ -127,7 +134,7 @@ class BernoulliRBM(RBM):
                .astype(np.float32)
 
     def mean_p_v_given_h(self, h):
-        return p_v_given_h(h)
+        return self.p_v_given_h(h)
 
     def par_nll_par_W(self, v, h):
         return np.matmul(v.T, h) / self._batch_size

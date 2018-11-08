@@ -3,7 +3,7 @@ import torch
 from torchvision.datasets import mnist
 from torchvision import transforms
 
-from .rbm import RBM
+from .rbm import BernoulliRBM
 from .beam import BEAM
 from .gbrbm import GaussianBernoulliRBM
 
@@ -26,7 +26,7 @@ gbrbm_params = {
     'batch_size': 20,
     'sigma': 0.2,
     'sparsity_coef': 0.1,
-    'h_given_v_entropy_coef': 0.01,
+    'h_given_v_entropy_coef': 0. #0.01,
 }
 
 gbrbm_training_params = {
@@ -67,18 +67,19 @@ def get_iterators(batch_size):
 
 
 def get_network(typ):
+    random_state = np.random.RandomState(seed=0)
     if typ == 'rbm':
         # prepare RBM
-        net = RBM(rbm_params['nv'],
-                  rbm_params['nh'],
-                  rbm_params['batch_size'],
-                  seed=0)
+        net = BernoulliRBM(rbm_params['nv'],
+                           rbm_params['nh'],
+                           rbm_params['batch_size'],
+                           random_state=random_state)
     elif typ == 'beam':
         # prepare BEAM
         net = BEAM(beam_params['nv'],
                    beam_params['nh'],
                    beam_params['batch_size'],
-                   seed=0)
+                   random_state=random_state)
     elif typ == 'gbrbm':
         net = GaussianBernoulliRBM(gbrbm_params['nv'],
                                    gbrbm_params['nh'],
@@ -86,7 +87,7 @@ def get_network(typ):
                                    gbrbm_params['sigma'],
                                    sparsity_coef=gbrbm_params['sparsity_coef'],
                                    h_given_v_entropy_coef=gbrbm_params['h_given_v_entropy_coef'],
-                                   seed=0)
+                                   random_state=random_state)
     return net
 
 

@@ -11,6 +11,100 @@ from .utils import sigmoid
 # TODO(anna): try unit test case? say in a 3x3 patch, only 1 pixel is on
 
 class GaussianBernoulliRBM(RBM):
+    additional_losses = [
+        'sparsity',
+        'h_given_v_entropy',
+    ]
+
+    def __init__(self,
+                 nv, nh,
+                 batch_size,
+                 sigma,
+                 sparsity_coef=0.,
+                 h_given_v_entropy_coef=0.,
+                 random_state=None):
+        super(GaussianBernoulliRBM, self).__init__(
+            nv, nh, batch_size, random_state=random_state)
+        self.sparsity_coef = sparsity_coef
+        self.h_given_v_entropy_coef = h_given_v_entropy_coef
+        self.sigma = sigma
+
+    def p_h_given_v(self, v):
+        # v: (batch_size, nv)
+        # output: (batch_size, nh)
+        return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W) / self.sigma)
+
+    def p_h_given_v_logits(self, v):
+        return self.hb[np.newaxis] + np.matmul(v, self.W) / self.sigma
+
+    def mean_p_v_given_h(self, h):
+        # h: (batch_size, nh)
+        # output: (batch_size, nv)
+        return self.vb[np.newaxis] + np.matmul(h, self.W.T)
+
+    def sample_p_v_given_h(self, h):
+        # h: (batch_size, nh)
+        # output: (batch_size, nv)
+        center = self.vb[np.newaxis] + np.matmul(h, self.W.T)
+        return self.random_state.normal(loc=center, scale=self.sigma)
+
+    def par_nll_par_W(self, v, h):
+        return np.matmul(v.T, h) / self._batch_size / self.sigma
+
+    def par_nll_par_hb(self, h):
+        return np.mean(h, axis=0)
+
+    def par_nll_par_vb(self, v):
+        return np.mean(v - self.vb, axis=0) / (self.sigma ** 2)
+
+    def par_l1_par_W(self):
+        return np.sign(self.W)
+
+    def updates_from_sparsity(self,
+                              v, p_h_given_v0, h0,
+                              vn, p_h_given_vn, hn,
+                              sample=False):
+        return -self.par_l1_par_W(), 0, 0
+
+    def updates_from_h_given_v_entropy(self,
+                                         v, p_h_given_v0, h0,
+                                         vn, p_h_given_vn, hn,
+                                         sample=False):
+        logits = self.p_h_given_v_logits(v)  # (batch_size, nh)
+        h_term = logits * sigmoid(logits) * (1. - sigmoid(logits))
+        delta_W_entropy = -np.matmul(v.T, h_term) / self.sigma
+        delta_hb_entropy = -np.mean(h_term, axis=0)
+        return -delta_W_entropy, 0, -delta_hb_entropy
+
+    # TODO: make these better by making the class picklable, maybe
+    def save(self, path):
+        if not path.endswith('.pkl'):
+            path += '.pkl'
+        model = {
+            'W': self.W,
+            'hb': self.hb,
+            'vb': self.vb,
+            'params': {
+                'nv': self._nv,
+                'nh': self._nh,
+                'batch_size': self._batch_size
+            },
+            'random_state': self._random_state,
+        }
+        joblib.dump(model, path, protocol=2)
+
+    def load(cls, path):
+        model = joblib.load(path)
+        self.W = model['W']
+        self.hb = model['hb']
+        self.vb = model['vb']
+        self._nv = model['params']['nv']
+        self._nh = model['params']['nh']
+        self._batch_size = model['params']['batch_size']
+        self._random_state = model['random_state']
+
+
+class GaussianBernoulliRBMOld(RBM):
     def __init__(self, nv, nh, batch_size,
                  sigma,
                  sparsity_coef=0.,

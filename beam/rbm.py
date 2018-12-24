@@ -11,17 +11,19 @@ from .utils import sigmoid
 class RBM(object):
     additional_losses = []
 
-    def __init__(self, nv, nh, batch_size, random_state=None):
+    def __init__(self, nv, nh, random_state=None):
         self._nv = nv
         self._nh = nh
-        self._batch_size = batch_size
-        self._random_state = random_state
+        self._random_state = random_state or np.random.RandomState()
 
     def initialize(self, scale=0.01):
         # NOTE(anna): very sensitive to initial W range; smaller seems better
         self.W = self._random_state.normal(0, scale, (self._nv, self._nh))
         self.vb = np.zeros((self._nv))
         self.hb = np.zeros((self._nh))
+
+    def p_h_given_v_logits(self, v):
+        raise NotImplementedError()
 
     def p_h_given_v(self, v):
         raise NotImplementedError()
@@ -68,9 +70,10 @@ class RBM(object):
         self.hb += learning_rate * delta_hb
 
     def run_chain(self, v, sample=False, n_gibbs=1):
+        batch_size = len(v)
         # first step, v -> h
         p_h_given_v0 = self.p_h_given_v(v)
-        h0 = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_v0)\
+        h0 = (self._random_state.rand(batch_size, self._nh) < p_h_given_v0)\
              .astype(np.float32)
 
         # now, do n_gibbs times of h -> v, v -> h
@@ -83,7 +86,7 @@ class RBM(object):
 
             p_h_given_vn = self.p_h_given_v(vn)
             # for hidden layer, always sample (unless calculating updates)
-            hn = (self._random_state.rand(self._batch_size, self._nh) < p_h_given_vn)\
+            hn = (self._random_state.rand(batch_size, self._nh) < p_h_given_vn)\
                  .astype(np.float32)
         return p_h_given_v0, h0, vn, p_h_given_vn, hn
 
@@ -113,14 +116,25 @@ class RBM(object):
                 par_nll_par_hb_data - par_nll_par_hb_model)
 
     def reconstruction_error(self, v):
-        h = (self._random_state.rand(self._batch_size, self._nh) < self.p_h_given_v(v))\
+        batch_size = len(v)
+        h = (self._random_state.rand(batch_size, self._nh) < self.p_h_given_v(v))\
             .astype(np.float32)
         v_ = self.mean_p_v_given_h(h)
         return np.mean((v - v_) ** 2)
 
+    def save(self, filename):
+        joblib.dump(self, filename)
+
+    @staticmethod
+    def load(filename):
+        return joblib.load(filename)
+
 
 class BernoulliRBM(RBM):
     typ = 'bernoulli'
+
+    def p_h_given_v_logits(self, v):
+        return self.hb[np.newaxis] + np.matmul(v, self.W)
 
     def p_h_given_v(self, v):
         return sigmoid(self.hb[np.newaxis] + np.matmul(v, self.W))
@@ -129,15 +143,17 @@ class BernoulliRBM(RBM):
         return sigmoid(self.vb[np.newaxis] + np.matmul(h, self.W.T))
 
     def sample_p_v_given_h(self, h):
+        batch_size = len(h)
         p_v_given_h = self.p_v_given_h(h)
-        return (self._random_state.rand(self._batch_size, self._nv) < p_v_given_h)\
+        return (self._random_state.rand(batch_size, self._nv) < p_v_given_h)\
                .astype(np.float32)
 
     def mean_p_v_given_h(self, h):
         return self.p_v_given_h(h)
 
     def par_nll_par_W(self, v, h):
-        return np.matmul(v.T, h) / self._batch_size
+        batch_size = len(v)
+        return np.matmul(v.T, h) / batch_size
 
     def par_nll_par_hb(self, h):
         return np.mean(h, axis=0)
@@ -267,7 +283,7 @@ class BernoulliRBMOld(RBM):
         # v: (batch_size, nv)
         h = (self._random_state.rand(self._batch_size, self._nh) < self.p_h_given_v(v))\
             .astype(np.float32)
-        v_ = self.p_v_given_h(h)
+        v_ = self.mean_p_v_given_h(h)
         return np.mean((v - v_) ** 2)
 
     # TODO: make these better by making the class picklable, maybe

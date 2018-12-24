@@ -18,13 +18,12 @@ class GaussianBernoulliRBM(RBM):
 
     def __init__(self,
                  nv, nh,
-                 batch_size,
                  sigma,
                  sparsity_coef=0.,
                  h_given_v_entropy_coef=0.,
                  random_state=None):
         super(GaussianBernoulliRBM, self).__init__(
-            nv, nh, batch_size, random_state=random_state)
+            nv, nh, random_state=random_state)
         self.sparsity_coef = sparsity_coef
         self.h_given_v_entropy_coef = h_given_v_entropy_coef
         self.sigma = sigma
@@ -49,7 +48,8 @@ class GaussianBernoulliRBM(RBM):
         return self.random_state.normal(loc=center, scale=self.sigma)
 
     def par_nll_par_W(self, v, h):
-        return np.matmul(v.T, h) / self._batch_size / self.sigma
+        batch_size = len(v)
+        return np.matmul(v.T, h) / batch_size / self.sigma
 
     def par_nll_par_hb(self, h):
         return np.mean(h, axis=0)
@@ -87,7 +87,6 @@ class GaussianBernoulliRBM(RBM):
             'params': {
                 'nv': self._nv,
                 'nh': self._nh,
-                'batch_size': self._batch_size
             },
             'random_state': self._random_state,
         }
@@ -100,7 +99,6 @@ class GaussianBernoulliRBM(RBM):
         self.vb = model['vb']
         self._nv = model['params']['nv']
         self._nh = model['params']['nh']
-        self._batch_size = model['params']['batch_size']
         self._random_state = model['random_state']
 
 
